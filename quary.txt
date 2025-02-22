@@ -1,0 +1,143 @@
+11. For each city, rank the cinemas in the city in descending order of total sales in 2018.
+SELECT 
+    cinema.state, 
+    cinema.id AS cinema_id, 
+    SUM(transaction.totalprice) AS total_sales,
+    RANK() OVER (PARTITION BY cinema.state ORDER BY SUM(transaction.totalprice) DESC) AS rank
+FROM transaction
+JOIN ticket ON transaction.id = ticket.transaction_id
+JOIN showing ON ticket.showing_id = showing.id
+JOIN hall ON showing.hall_id = hall.id
+JOIN cinema ON hall.cinema_id = cinema.id
+WHERE transaction.transaction_year = 2018
+GROUP BY cinema.state, cinema.id;
+
+12. For each director, rank his/her movies in descending orders of total sales for customers with ages under 40 (at the time of ticket purchases). 
+SELECT 
+    director.id AS director_id, 
+    director.name AS director_name, 
+    movie.title, 
+    SUM(transaction.totalprice) AS total_sales,
+    RANK() OVER (PARTITION BY director.id ORDER BY SUM(transaction.totalprice) DESC) AS rank
+FROM transaction
+JOIN customer ON transaction.customer_id = customer.id
+JOIN ticket ON transaction.id = ticket.transaction_id
+JOIN showing ON ticket.showing_id = showing.id
+JOIN movie ON showing.movie_id = movie.id
+JOIN director ON movie.director_id = director.id
+WHERE transaction.transaction_year = 2018 
+AND EXTRACT(YEAR FROM AGE(transaction.date, customer.dob)) < 40
+GROUP BY director.id, director.name, movie.title;
+
+
+13. Consider the online transactions made with various browsers, for cinemas in different states. For each city, rank the browsers in descending order of the total numbers of transactions made.
+SELECT 
+    cinema.state, 
+    transaction.browser, 
+    COUNT(transaction.id) AS total_transactions,
+    RANK() OVER (PARTITION BY cinema.state ORDER BY COUNT(transaction.id) DESC) AS rank
+FROM transaction
+JOIN ticket ON transaction.id = ticket.transaction_id
+JOIN showing ON ticket.showing_id = showing.id
+JOIN hall ON showing.hall_id = hall.id
+JOIN cinema ON hall.cinema_id = cinema.id
+WHERE transaction.transaction_type = 'Online'
+GROUP BY cinema.state, transaction.browser;
+
+
+14. Find the top 10 movies in 2018 (in terms of the total number of tickets sold) for male and female customers, respectively. 
+WITH ranked_movies AS (
+    SELECT 
+        customer.gender, 
+        movie.title, 
+        COUNT(ticket.id) AS total_tickets_sold,
+        RANK() OVER (PARTITION BY customer.gender ORDER BY COUNT(ticket.id) DESC) AS rank
+    FROM transaction
+    JOIN customer ON transaction.customer_id = customer.id
+    JOIN ticket ON transaction.id = ticket.transaction_id
+    JOIN showing ON ticket.showing_id = showing.id
+    JOIN movie ON showing.movie_id = movie.id
+    WHERE transaction.transaction_year = 2018
+    GROUP BY customer.gender, movie.title
+)
+SELECT * FROM ranked_movies WHERE rank <= 10;
+
+
+
+15. For each city, find the top 5 cinemas in terms of the total number of tickets sold from 2014 to 2018.
+WITH ranked_cinemas AS (
+    SELECT 
+        cinema.state, 
+        cinema.id AS cinema_id, 
+        COUNT(ticket.id) AS total_tickets_sold,
+        RANK() OVER (PARTITION BY cinema.state ORDER BY COUNT(ticket.id) DESC) AS rank
+    FROM transaction
+    JOIN ticket ON transaction.id = ticket.transaction_id
+    JOIN showing ON ticket.showing_id = showing.id
+    JOIN hall ON showing.hall_id = hall.id
+    JOIN cinema ON hall.cinema_id = cinema.id
+    WHERE transaction.transaction_year BETWEEN 2014 AND 2018
+    GROUP BY cinema.state, cinema.id
+)
+SELECT * FROM ranked_cinemas WHERE rank <= 5;
+
+
+16. Compute the 8-week moving average of total sales, for each week in 2018. 
+SELECT 
+    transaction_week, 
+    SUM(total_sales) OVER (ORDER BY transaction_week ROWS BETWEEN 7 PRECEDING AND CURRENT ROW) AS moving_avg_sales
+FROM (
+    SELECT DATE_TRUNC('week', date) AS transaction_week, SUM(totalprice) AS total_sales
+    FROM transaction
+    WHERE transaction.transaction_year = 2018
+    GROUP BY transaction_week
+) subquery;
+
+
+
+17. Compute the largest three 4-week moving averages of total sales, among the weeks in 2018.
+SELECT transaction_week, moving_avg_sales
+FROM (
+    SELECT transaction_week, 
+           SUM(total_sales) OVER (ORDER BY transaction_week ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) AS moving_avg_sales
+    FROM (
+        SELECT DATE_TRUNC('week', date) AS transaction_week, SUM(totalprice) AS total_sales
+        FROM transaction
+        WHERE transaction.transaction_year = 2018
+        GROUP BY transaction_week
+    ) subquery
+) moving_averages
+ORDER BY moving_avg_sales DESC
+LIMIT 3;
+
+
+
+18. For each city, compute the largest 4-week moving average of total sales from 2010 to 2018.
+WITH weekly_sales AS (
+    SELECT 
+        DATE_TRUNC('week', t.date) AS transaction_week, 
+        c.state, 
+        SUM(t.totalprice) AS total_sales
+    FROM transaction t
+    JOIN ticket tk ON t.id = tk.transaction_id
+    JOIN showing s ON tk.showing_id = s.id
+    JOIN hall h ON s.hall_id = h.id
+    JOIN cinema c ON h.cinema_id = c.id  
+    WHERE t.transaction_year BETWEEN 2010 AND 2018
+    GROUP BY transaction_week, c.state
+)
+SELECT 
+    state, 
+    MAX(moving_avg_sales) AS largest_4_week_avg_sales
+FROM (
+    SELECT 
+        state, 
+        transaction_week, 
+        SUM(total_sales) OVER (
+            PARTITION BY state 
+            ORDER BY transaction_week 
+            ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
+        ) AS moving_avg_sales
+    FROM weekly_sales
+) moving_averages
+GROUP BY state;
